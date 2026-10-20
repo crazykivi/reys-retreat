@@ -167,8 +167,12 @@ func main() {
 
 	if err := installMrpack(packPath, dest); err != nil { fatalf("Installation failed: %v", err) }
 	modsDir := filepath.Join(dest, "mods")
-	if *bopFlag { if err := installModBySlug("biomes-o-plenty", modsDir, map[string]bool{}); err != nil { fatalf("Biomes O' Plenty: %v", err) } }
-	if *tanFlag { if err := installModBySlug("tough-as-nails", modsDir, map[string]bool{}); err != nil { fatalf("Tough As Nails: %v", err) } }
+	bop, tan := *bopFlag, *tanFlag
+	if !flagWasPassed("biomes-o-plenty") { bop = askYesNo("Install optional Biomes O' Plenty? [y/N]") }
+	if !flagWasPassed("tough-as-nails") { tan = askYesNo("Install optional Tough As Nails? [y/N]") }
+	installed := map[string]bool{}
+	if bop { if err := installModBySlug("biomes-o-plenty", modsDir, installed); err != nil { fatalf("Biomes O' Plenty: %v", err) } }
+	if tan { if err := installModBySlug("tough-as-nails", modsDir, installed); err != nil { fatalf("Tough As Nails: %v", err) } }
 
 	fmt.Println("\nInstallation files are ready.")
 	fmt.Println("This tool installs the pack files; it does not install Java or a Minecraft launcher.")
@@ -376,6 +380,23 @@ func getJSON(rawURL string, target any) error {
 func contains(values []string, wanted string) bool { for _, v := range values { if v == wanted { return true } }; return false }
 func isDirectoryEmpty(dir string) bool {
 	entries, err := os.ReadDir(dir); if errors.Is(err, os.ErrNotExist) { return true }; return err == nil && len(entries) == 0
+}
+func flagWasPassed(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) { if f.Name == name { found = true } })
+	return found
+}
+func askYesNo(prompt string) bool {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print(prompt + " ")
+		line, _ := reader.ReadString('\n')
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes": return true
+		case "", "n", "no": return false
+		default: fmt.Println("Please answer y or n.")
+		}
+	}
 }
 func askChoice(prompt string, options map[string]string) string {
 	reader := bufio.NewReader(os.Stdin)
