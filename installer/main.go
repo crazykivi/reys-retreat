@@ -399,10 +399,9 @@ func askYesNo(prompt string) bool {
 	}
 }
 func askChoice(prompt string, options map[string]string) string {
-	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print(prompt + ": ")
-		line, _ := reader.ReadString('\n')
+		line, _ := stdinReader.ReadString('\n')
 		if value, ok := options[strings.ToLower(strings.TrimSpace(line))]; ok { return value }
 		fmt.Println("Invalid choice; try again.")
 	}
