@@ -46,5 +46,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reys-retreat-mod-downloader-windows-amd64
-          path: installer/reys-retreat-installer.exe
+          path: installer/reys-retreat-mod-downloader.exe
           if-no-files-found: error
