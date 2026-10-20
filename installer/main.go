@@ -168,7 +168,7 @@ func main() {
 	if err := downloadTempAsset(assetURL, packPath, assetSize, assetDigest); err != nil { fatalf("Could not read release manifest: %v", err) }
 	defer os.Remove(packPath)
 
-	if err := downloadMrpackMods(packPath, dest); err != nil { fatalf("Mod download failed: %v", err) }
+	if err := downloadMrpackMods(packPath, dest, edition); err != nil { fatalf("Mod download failed: %v", err) }
 	modsDir := dest
 	bop, tan := *bopFlag, *tanFlag
 	if !flagWasPassed("biomes-o-plenty") { bop = askYesNo("Install optional Biomes O' Plenty? [y/N]") }
@@ -198,7 +198,7 @@ func getReleases() ([]release, error) {
 	return out, nil
 }
 
-func downloadMrpackMods(packPath, dest string) error {
+func downloadMrpackMods(packPath, dest, edition string) error {
 	zr, err := zip.OpenReader(packPath)
 	if err != nil { return fmt.Errorf("invalid .mrpack archive: %w", err) }
 	defer zr.Close()
@@ -229,6 +229,9 @@ func downloadMrpackMods(packPath, dest string) error {
 		rel, err := safeRelative(item.Path)
 		if err != nil { return fmt.Errorf("unsafe manifest path %q: %w", item.Path, err) }
 		if !strings.EqualFold(filepath.Ext(rel), ".jar") { continue }
+		if edition == "standard" && isNvidiumEntry(item) {
+			return fmt.Errorf("invalid Standard Edition manifest: Nvidium entry %q is not allowed; the published release asset is incorrect", item.Path)
+		}
 		mods = append(mods, item)
 	}
 	if len(mods) == 0 { return errors.New("release manifest contains no downloadable client mod JARs") }
@@ -257,6 +260,18 @@ func downloadMrpackMods(packPath, dest string) error {
 	}
 	fmt.Printf("Pack target: Minecraft %s / Fabric %s\n", index.Dependencies["minecraft"], index.Dependencies["fabric-loader"])
 	return nil
+}
+
+func isNvidiumEntry(item mrpackFile) bool {
+	if strings.Contains(strings.ToLower(item.Path), "nvidium") {
+		return true
+	}
+	for _, download := range item.Downloads {
+		if strings.Contains(strings.ToLower(download), "nvidium") {
+			return true
+		}
+	}
+	return false
 }
 
 func sameHashMaps(a, b map[string]string) bool {
