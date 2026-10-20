@@ -202,8 +202,9 @@ jobs:
 
               nvidium_entries = [
                   path for path in mod_files
-                  if path.lower().endswith("/nvidium.jar")
-                  or path.lower() == "mods/nvidium.jar"
+                  if path.lower().startswith("mods/")
+                  and path.rsplit("/", 1)[-1].lower().startswith("nvidium")
+                  and path.lower().endswith(".jar")
               ]
 
               return metadata, mod_files, nvidium_entries
