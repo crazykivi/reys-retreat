@@ -147,7 +147,7 @@ func main() {
 	dest := strings.TrimSpace(*dirFlag)
 	if dest == "" {
 		defaultDir := filepath.Join(".", "Reys-Retreat-"+strings.TrimPrefix(selected.TagName, "v")+"-"+strings.ToUpper(edition))
-		fmt.Printf("Installation directory [%s]: ", defaultDir)
+		fmt.Printf("Mods output directory [%s]: ", defaultDir)
 		if line, _ := bufio.NewReader(os.Stdin).ReadString('\n'); strings.TrimSpace(line) != "" { dest = strings.TrimSpace(line) } else { dest = defaultDir }
 	}
 	dest, err = filepath.Abs(dest)
@@ -166,8 +166,8 @@ func main() {
 	if err := downloadToFile(assetURL, packPath, nil, 0); err != nil { fatalf("Modpack download failed: %v", err) }
 	defer os.Remove(packPath)
 
-	if err := installMrpack(packPath, dest); err != nil { fatalf("Installation failed: %v", err) }
-	modsDir := filepath.Join(dest, "mods")
+	if err := downloadMrpackMods(packPath, dest); err != nil { fatalf("Mod download failed: %v", err) }
+	modsDir := dest
 	bop, tan := *bopFlag, *tanFlag
 	if !flagWasPassed("biomes-o-plenty") { bop = askYesNo("Install optional Biomes O' Plenty? [y/N]") }
 	if !flagWasPassed("tough-as-nails") { tan = askYesNo("Install optional Tough As Nails? [y/N]") }
@@ -175,9 +175,9 @@ func main() {
 	if bop { if err := installModBySlug("biomes-o-plenty", modsDir, installed); err != nil { fatalf("Biomes O' Plenty: %v", err) } }
 	if tan { if err := installModBySlug("tough-as-nails", modsDir, installed); err != nil { fatalf("Tough As Nails: %v", err) } }
 
-	fmt.Println("\nInstallation files are ready.")
-	fmt.Println("This tool installs the pack files; it does not install Java or a Minecraft launcher.")
-	fmt.Println("Use a launcher configured for Minecraft 1.21.1 + Fabric to launch this instance.")
+	fmt.Println("\nMod downloads are ready.")
+	fmt.Println("Only mod JARs were downloaded into the selected folder; configs and overrides were not copied.")
+	fmt.Println("The folder is not a ready-to-launch Minecraft instance. Copy the mods into your own instance if desired.")
 }
 
 func getReleases() ([]release, error) {
@@ -196,51 +196,71 @@ func getReleases() ([]release, error) {
 	return out, nil
 }
 
-func installMrpack(packPath, dest string) error {
+func downloadMrpackMods(packPath, dest string) error {
 	zr, err := zip.OpenReader(packPath)
 	if err != nil { return fmt.Errorf("invalid .mrpack archive: %w", err) }
 	defer zr.Close()
 	var index mrpackIndex
-	var foundIndex bool
+	foundIndex := false
 	for _, f := range zr.File {
-		if f.Name == "modrinth.index.json" {
-			rc, err := f.Open(); if err != nil { return err }
-			err = json.NewDecoder(io.LimitReader(rc, 16<<20)).Decode(&index); _ = rc.Close()
-			if err != nil { return fmt.Errorf("read modrinth.index.json: %w", err) }
-			foundIndex = true; break
-		}
+		if f.Name != "modrinth.index.json" { continue }
+		rc, err := f.Open()
+		if err != nil { return err }
+		err = json.NewDecoder(io.LimitReader(rc, 16<<20)).Decode(&index)
+		_ = rc.Close()
+		if err != nil { return fmt.Errorf("read modrinth.index.json: %w", err) }
+		foundIndex = true
+		break
 	}
 	if !foundIndex { return errors.New("archive does not contain modrinth.index.json") }
-	if index.Dependencies["minecraft"] != gameVersion { return fmt.Errorf("pack targets Minecraft %q; this installer only supports %s", index.Dependencies["minecraft"], gameVersion) }
+	if index.Dependencies["minecraft"] != gameVersion {
+		return fmt.Errorf("pack targets Minecraft %q; this downloader only supports %s", index.Dependencies["minecraft"], gameVersion)
+	}
 	if index.Dependencies["fabric-loader"] == "" { return errors.New("pack does not declare a Fabric loader") }
-
 	if err := os.MkdirAll(dest, 0755); err != nil { return err }
-	fmt.Printf("Installing %d indexed files...\n", len(index.Files))
-	for i, item := range index.Files {
+	// Only download mod JARs. Never extract overrides or copy config/resource files.
+	type priorFile struct { hashes map[string]string; source string }
+	seen := map[string]priorFile{}
+	var mods []mrpackFile
+	for _, item := range index.Files {
 		if item.Env["client"] == "unsupported" { continue }
-		rel, err := safeRelative(item.Path); if err != nil { return fmt.Errorf("unsafe manifest path %q: %w", item.Path, err) }
-		target := filepath.Join(dest, rel)
-		if fileMatchesHashes(target, item.Hashes) { fmt.Printf("[%d/%d] already valid: %s\n", i+1, len(index.Files), item.Path); continue }
+		rel, err := safeRelative(item.Path)
+		if err != nil { return fmt.Errorf("unsafe manifest path %q: %w", item.Path, err) }
+		if !strings.EqualFold(filepath.Ext(rel), ".jar") { continue }
+		mods = append(mods, item)
+	}
+	if len(mods) == 0 { return errors.New("release manifest contains no downloadable client mod JARs") }
+	fmt.Printf("Modpack release %s contains %d mod JAR entries. Downloading mods only; no configs or overrides will be installed.\n", index.VersionID, len(mods))
+	for i, item := range mods {
+		rel, _ := safeRelative(item.Path)
+		name := filepath.Base(rel)
+		if name == "." || name == string(filepath.Separator) || name == "" { return fmt.Errorf("invalid JAR filename in manifest: %q", item.Path) }
+		target := filepath.Join(dest, name)
+		if previous, ok := seen[strings.ToLower(name)]; ok {
+			if sameHashMaps(previous.hashes, item.Hashes) { continue }
+			return fmt.Errorf("two different mod files have the same filename %q (%s and %s); refusing to overwrite", name, previous.source, item.Path)
+		}
+		seen[strings.ToLower(name)] = priorFile{hashes:item.Hashes, source:item.Path}
+		if fileMatchesHashes(target, item.Hashes) {
+			fmt.Printf("[%d/%d] already valid: %s\n", i+1, len(mods), name)
+			continue
+		}
 		if len(item.Downloads) == 0 { return fmt.Errorf("%s has no download URLs", item.Path) }
 		var lastErr error
 		for _, u := range item.Downloads {
 			if err := downloadToFile(u, target, item.Hashes, 0); err == nil { lastErr = nil; break } else { lastErr = err }
 		}
 		if lastErr != nil { return fmt.Errorf("download %s: %w", item.Path, lastErr) }
-		fmt.Printf("[%d/%d] downloaded: %s\n", i+1, len(index.Files), item.Path)
+		fmt.Printf("[%d/%d] downloaded: %s\n", i+1, len(mods), name)
 	}
-	for _, f := range zr.File {
-		if !strings.HasPrefix(f.Name, "overrides/") || f.FileInfo().IsDir() { continue }
-		rel, err := safeRelative(strings.TrimPrefix(f.Name, "overrides/")); if err != nil { return fmt.Errorf("unsafe override path %q: %w", f.Name, err) }
-		target := filepath.Join(dest, rel)
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil { return err }
-		if _, err := os.Stat(target); err == nil { continue } else if !errors.Is(err, os.ErrNotExist) { return err }
-		rc, err := f.Open(); if err != nil { return err }
-		if err := writeLimited(target, rc, 256<<20); err != nil { _ = rc.Close(); return fmt.Errorf("extract override %s: %w", rel, err) }
-		_ = rc.Close()
-	}
-	fmt.Printf("Minecraft %s / Fabric %s\n", index.Dependencies["minecraft"], index.Dependencies["fabric-loader"])
+	fmt.Printf("Pack target: Minecraft %s / Fabric %s\n", index.Dependencies["minecraft"], index.Dependencies["fabric-loader"])
 	return nil
+}
+
+func sameHashMaps(a, b map[string]string) bool {
+	if len(a) != len(b) { return false }
+	for k, v := range a { if !strings.EqualFold(v, b[k]) { return false } }
+	return true
 }
 
 func installModBySlug(slug, modsDir string, installed map[string]bool) error {
