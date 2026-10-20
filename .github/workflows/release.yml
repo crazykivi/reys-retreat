@@ -299,6 +299,11 @@ jobs:
             printf '%s\n' "- `reys-retreat-nvidia-${VERSION}.mrpack` — NVIDIA Edition with Nvidium."
             echo
             echo 'Both files are Modrinth-format modpack archives; they do not contain a standalone copy of every mod JAR.'
+            echo
+            echo '### Portable Windows mod downloader'
+            echo
+            echo '- `reys-retreat-mod-downloader-windows-amd64.exe` — standalone Windows x64 utility.'
+            echo '- It downloads and verifies mod JARs from a selected release into a folder. It does not install a Minecraft profile, copy configs, or launch the game.'
           } >> body.md
 
       - name: Publish GitHub Release
