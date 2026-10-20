@@ -177,7 +177,7 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          PREV_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -Fxv "$TAG_NAME" | head -n 1 || true)"
+          PREV_TAG="$(git tag --merged "$TAG_NAME" --list 'v[0-9]*' --sort=-version:refname | grep -Fxv "$TAG_NAME" | head -n 1 || true)"
 
           {
             echo "# Rey's Retreat ${VERSION}"
