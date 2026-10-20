@@ -54,20 +54,23 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Release version: $VERSION"
 
-      - name: Setup Packwiz
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Install Packwiz
         shell: bash
         run: |
           set -euo pipefail
 
-          curl -fsSL \
-            -o packwiz.zip \
-            https://github.com/packwiz/packwiz/releases/latest/download/packwiz_linux_amd64.zip
+          go install github.com/packwiz/packwiz@latest
 
-          unzip -o packwiz.zip
-          chmod +x packwiz
-          sudo install -m 0755 packwiz /usr/local/bin/packwiz
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-          packwiz --help
+          "$(go env GOPATH)/bin/packwiz" --help
+
 
       - name: Prepare isolated build workspaces
         shell: bash
