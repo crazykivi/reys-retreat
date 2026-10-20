@@ -3,7 +3,7 @@ name: Installer CI
 on:
   push:
     branches:
-      - feature/go-portable-installer
+      - main
     paths:
       - "installer/**"
       - ".github/workflows/installer-ci.yml"
