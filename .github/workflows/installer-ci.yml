@@ -40,11 +40,11 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
-        run: go build -trimpath -ldflags="-s -w" -o reys-retreat-installer.exe .
+        run: go build -trimpath -ldflags="-s -w" -o reys-retreat-mod-downloader.exe .
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: reys-retreat-installer-windows-amd64
+          name: reys-retreat-mod-downloader-windows-amd64
           path: installer/reys-retreat-installer.exe
           if-no-files-found: error
