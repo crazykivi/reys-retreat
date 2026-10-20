@@ -145,6 +145,9 @@ jobs:
           OUTPUT="$GITHUB_WORKSPACE/dist/reys-retreat-nvidia-${VERSION}.mrpack"
 
           cp "$WORKSPACE/extra/nvidia/nvidium.pw.toml" "$WORKSPACE/mods/nvidium.pw.toml"
+          # The source metadata is only a template. Keeping it under extra/nvidia
+          # makes Packwiz index/export it as a second Nvidium entry.
+          rm -rf "$WORKSPACE/extra/nvidia"
           find "$WORKSPACE/mods" -type f -name '*.pw.toml.disabled' -delete
 
           cd "$WORKSPACE"
@@ -193,8 +196,15 @@ jobs:
                   "ERROR: Standard Edition unexpectedly contains Nvidium-related entries: "
                   + ", ".join(standard_nvidium)
               )
-          if not any(item.lower().startswith("mods/") and item.lower().endswith(".jar") for item in nvidia_nvidium):
-              raise SystemExit("ERROR: NVIDIA Edition does not list the Nvidium JAR in its index.")
+          nvidia_jars = [
+              item for item in nvidia_nvidium
+              if item.lower().startswith("mods/") and item.lower().endswith(".jar")
+          ]
+          if len(nvidia_jars) != 1 or len(nvidia_nvidium) != 1:
+              raise SystemExit(
+                  "ERROR: NVIDIA Edition must contain exactly one Nvidium JAR entry; found: "
+                  + ", ".join(nvidia_nvidium)
+              )
 
           print(f"Standard files indexed: {len(standard_files)}")
           print(f"NVIDIA files indexed: {len(nvidia_files)}")
