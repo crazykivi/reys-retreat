@@ -38,3 +38,23 @@ func TestVerifyHashValues(t *testing.T) {
 
 func hashOf(data []byte) hash.Hash { h := sha1.New(); _, _ = h.Write(data); return h }
 func hash512Of(data []byte) hash.Hash { h := sha512.New(); _, _ = h.Write(data); return h }
+
+func TestIsNvidiumEntry(t *testing.T) {
+	cases := []struct {
+		name string
+		item mrpackFile
+		want bool
+	}{
+		{name: "ordinary mod", item: mrpackFile{Path: "mods/sodium.jar", Downloads: []string{"https://cdn.modrinth.com/sodium.jar"}}, want: false},
+		{name: "Nvidium path", item: mrpackFile{Path: "mods/nvidium-0.4.1.jar"}, want: true},
+		{name: "Nvidium download URL", item: mrpackFile{Path: "mods/render-optimizations.jar", Downloads: []string{"https://example.com/Nvidium.jar"}}, want: true},
+		{name: "Nvidium metadata", item: mrpackFile{Path: "mods/nvidium.pw.toml"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNvidiumEntry(tc.item); got != tc.want {
+				t.Fatalf("isNvidiumEntry() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

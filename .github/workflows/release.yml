@@ -121,8 +121,14 @@ jobs:
 
           find "$WORKSPACE/mods" -type f -name '*.pw.toml.disabled' -delete
 
-          if find "$WORKSPACE/mods" -type f -name 'nvidium.pw.toml' | grep -q .; then
-            echo "::error::Nvidium metadata must not be included in Standard Edition."
+          # Standard is intentionally built without the NVIDIA-only metadata.
+          # Remove it from the isolated workspace before Packwiz refresh so stale
+          # index entries cannot accidentally leak into the exported .mrpack.
+          rm -rf "$WORKSPACE/extra/nvidia"
+          find "$WORKSPACE/mods" -type f -iname '*nvidium*' -delete
+
+          if find "$WORKSPACE/mods" -type f -iname '*nvidium*' | grep -q .; then
+            echo "::error::Nvidium files must not be included in Standard Edition."
             exit 1
           fi
 
@@ -175,9 +181,7 @@ jobs:
               paths = [item.get("path", "") for item in files if isinstance(item, dict)]
               nvidium = [
                   item for item in paths
-                  if item.lower().startswith("mods/")
-                  and item.rsplit("/", 1)[-1].lower().startswith("nvidium")
-                  and item.lower().endswith(".jar")
+                  if "nvidium" in item.lower()
               ]
               return paths, nvidium
 
@@ -185,9 +189,12 @@ jobs:
           nvidia_files, nvidia_nvidium = inspect_archive(sys.argv[2])
 
           if standard_nvidium:
-              raise SystemExit("ERROR: Standard Edition unexpectedly contains Nvidium.")
-          if not nvidia_nvidium:
-              raise SystemExit("ERROR: NVIDIA Edition does not list Nvidium in its index.")
+              raise SystemExit(
+                  "ERROR: Standard Edition unexpectedly contains Nvidium-related entries: "
+                  + ", ".join(standard_nvidium)
+              )
+          if not any(item.lower().startswith("mods/") and item.lower().endswith(".jar") for item in nvidia_nvidium):
+              raise SystemExit("ERROR: NVIDIA Edition does not list the Nvidium JAR in its index.")
 
           print(f"Standard files indexed: {len(standard_files)}")
           print(f"NVIDIA files indexed: {len(nvidia_files)}")
