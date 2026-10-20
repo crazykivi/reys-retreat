@@ -7,10 +7,12 @@ on:
     paths:
       - "installer/**"
       - ".github/workflows/installer-ci.yml"
+      - ".github/workflows/release.yml"
   pull_request:
     paths:
       - "installer/**"
       - ".github/workflows/installer-ci.yml"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
