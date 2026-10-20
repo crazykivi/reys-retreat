@@ -1,0 +1,1 @@
+Keep NVIDIA-only Packwiz metadata in this directory. The Windows build and GitHub Actions workflow copy `nvidium.pw.toml` into a temporary NVIDIA workspace only; do not keep an active copy of it in the main `mods/` directory.

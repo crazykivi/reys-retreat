@@ -1,0 +1,13 @@
+name = "Rey's Retreat"
+author = "crazykivi"
+version = "0.3.0"
+pack-format = "packwiz:1.1.0"
+
+[index]
+file = "index.toml"
+hash-format = "sha256"
+hash = "06f36be8312409658dce707587977ceb43d6d2c794be79533de481f01843ed9c"
+
+[versions]
+fabric = "0.19.5"
+minecraft = "1.21.1"

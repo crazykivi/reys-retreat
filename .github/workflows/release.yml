@@ -1,0 +1,278 @@
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish modpack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag '$TAG_NAME'. Expected format: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          VERSION="${TAG_NAME#v}"
+
+          if [[ ! -f pack.toml ]]; then
+            echo "::error::pack.toml was not found."
+            exit 1
+          fi
+
+          PACK_VERSION="$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' pack.toml | head -n 1)"
+
+          if [[ -z "$PACK_VERSION" ]]; then
+            echo "::error::Could not read version from pack.toml."
+            exit 1
+          fi
+
+          if [[ "$PACK_VERSION" != "$VERSION" ]]; then
+            echo "::error::Tag version ($VERSION) does not match pack.toml version ($PACK_VERSION)."
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Release version: $VERSION"
+
+      - name: Setup Packwiz
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            -o packwiz.zip \
+            https://github.com/packwiz/packwiz/releases/latest/download/packwiz_linux_amd64.zip
+
+          unzip -o packwiz.zip
+          chmod +x packwiz
+          sudo install -m 0755 packwiz /usr/local/bin/packwiz
+
+          packwiz --help
+
+      - name: Prepare isolated build workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p \
+            "$RUNNER_TEMP/reys-standard" \
+            "$RUNNER_TEMP/reys-nvidia" \
+            "$GITHUB_WORKSPACE/dist"
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='dist/' \
+            --exclude='incoming/' \
+            --exclude='.idea/' \
+            --exclude='.vscode/' \
+            "$GITHUB_WORKSPACE/" "$RUNNER_TEMP/reys-standard/"
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='dist/' \
+            --exclude='incoming/' \
+            --exclude='.idea/' \
+            --exclude='.vscode/' \
+            "$GITHUB_WORKSPACE/" "$RUNNER_TEMP/reys-nvidia/"
+
+          test -f "$RUNNER_TEMP/reys-standard/pack.toml"
+          test -f "$RUNNER_TEMP/reys-standard/index.toml"
+          test -d "$RUNNER_TEMP/reys-standard/mods"
+
+          test -f "$RUNNER_TEMP/reys-nvidia/extra/nvidia/nvidium.pw.toml"
+          test -d "$RUNNER_TEMP/reys-nvidia/mods"
+
+      - name: Build Standard Edition
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKSPACE="$RUNNER_TEMP/reys-standard"
+          OUTPUT="$GITHUB_WORKSPACE/dist/reys-retreat-standard-${VERSION}.mrpack"
+
+          find "$WORKSPACE/mods" \
+            -type f \
+            -name '*.pw.toml.disabled' \
+            -delete
+
+          if find "$WORKSPACE/mods" -type f -name 'nvidium.pw.toml' | grep -q .; then
+            echo "::error::Nvidium metadata must not be included in Standard Edition."
+            exit 1
+          fi
+
+          cd "$WORKSPACE"
+
+          packwiz refresh
+          packwiz modrinth export --output "$OUTPUT"
+
+          test -s "$OUTPUT"
+
+      - name: Build NVIDIA Edition
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKSPACE="$RUNNER_TEMP/reys-nvidia"
+          OUTPUT="$GITHUB_WORKSPACE/dist/reys-retreat-nvidia-${VERSION}.mrpack"
+
+          cp \
+            "$WORKSPACE/extra/nvidia/nvidium.pw.toml" \
+            "$WORKSPACE/mods/nvidium.pw.toml"
+
+          find "$WORKSPACE/mods" \
+            -type f \
+            -name '*.pw.toml.disabled' \
+            -delete
+
+          cd "$WORKSPACE"
+
+          packwiz refresh
+          packwiz modrinth export --output "$OUTPUT"
+
+          test -s "$OUTPUT"
+
+      - name: Validate generated archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STANDARD="dist/reys-retreat-standard-${VERSION}.mrpack"
+          NVIDIA="dist/reys-retreat-nvidia-${VERSION}.mrpack"
+
+          test -s "$STANDARD"
+          test -s "$NVIDIA"
+
+          echo "Generated archives:"
+          ls -lh "$STANDARD" "$NVIDIA"
+
+          python3 - "$STANDARD" "$NVIDIA" <<'PY'
+          import json
+          import sys
+          import zipfile
+
+          standard_path, nvidia_path = sys.argv[1:3]
+
+          def inspect_archive(path):
+              with zipfile.ZipFile(path) as archive:
+                  names = archive.namelist()
+                  index_name = "modrinth.index.json"
+
+                  if index_name not in names:
+                      raise SystemExit(
+                          f"ERROR: {path} does not contain {index_name}"
+                      )
+
+                  with archive.open(index_name) as file:
+                      index = json.load(file)
+
+              files = index.get("files", [])
+              metadata = index.get("dependencies", {})
+
+              if not isinstance(files, list):
+                  raise SystemExit(f"ERROR: Invalid files list in {path}")
+
+              mod_files = [
+                  item.get("path", "")
+                  for item in files
+                  if isinstance(item, dict)
+              ]
+
+              nvidium_entries = [
+                  path for path in mod_files
+                  if path.lower().endswith("/nvidium.jar")
+                  or path.lower() == "mods/nvidium.jar"
+              ]
+
+              return metadata, mod_files, nvidium_entries
+
+          _, standard_files, standard_nvidium = inspect_archive(standard_path)
+          _, nvidia_files, nvidia_nvidium = inspect_archive(nvidia_path)
+
+          if standard_nvidium:
+              raise SystemExit(
+                  "ERROR: Standard Edition unexpectedly contains Nvidium."
+              )
+
+          if not nvidia_nvidium:
+              raise SystemExit(
+                  "ERROR: NVIDIA Edition does not list Nvidium in its index."
+              )
+
+          print(f"Standard files indexed: {len(standard_files)}")
+          print(f"NVIDIA files indexed: {len(nvidia_files)}")
+          print("Nvidium edition check passed.")
+          PY
+
+      - name: Generate changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PREV_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname \
+            | grep -Fxv "$GITHUB_REF_NAME" \
+            | head -n 1 || true)"
+
+          if [[ -n "$PREV_TAG" ]]; then
+            {
+              echo "## Changes since $PREV_TAG"
+              echo
+
+              echo "### Commits"
+              git log --no-merges --pretty=format:'- %s (%h)' \
+                "$PREV_TAG..$GITHUB_REF_NAME"
+              echo
+              echo
+
+              echo "### Added mod metadata"
+              git diff --diff-filter=A --name-only \
+                "$PREV_TAG" "$GITHUB_REF_NAME" -- mods/ \
+                | sed 's|^mods/||; s|\.pw\.toml$||'
+              echo
+              echo
+
+              echo "### Removed mod metadata"
+              git diff --diff-filter=D --name-only \
+                "$PREV_TAG" "$GITHUB_REF_NAME" -- mods/ \
+                | sed 's|^mods/||; s|\.pw\.toml$||'
+              echo
+            } > body.md
+          else
+            {
+              echo "## Rey's Retreat ${VERSION}"
+              echo
+              echo "Initial release."
+            } > body.md
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Rey's Retreat ${{ env.VERSION }}
+          body_path: body.md
+          files: |
+            dist/reys-retreat-standard-${{ env.VERSION }}.mrpack
+            dist/reys-retreat-nvidia-${{ env.VERSION }}.mrpack
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

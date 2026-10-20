@@ -1,0 +1,13 @@
+name = "Millager (Village Defenders)"
+filename = "millager-fabric-1.21.1-0.7.7.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/DFGcsxUu/versions/n0GIQp9y/millager-fabric-1.21.1-0.7.7.jar"
+hash-format = "sha512"
+hash = "4e52b03b64dd7e73d85718399efaf6478d2f404c9c237c335d474c726a28845f27ae0be964623c2bc3949ff0d46b7c7fe93de339cffe3d731105d76ad0393577"
+
+[update]
+[update.modrinth]
+mod-id = "DFGcsxUu"
+version = "n0GIQp9y"

@@ -1,0 +1,13 @@
+name = "Durability101 Fabric/Forge 1.12-1.21.11"
+filename = "Durability101-fabric-1.21-0.0.5.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/Yt3rEMOb/versions/TpHvBaS6/Durability101-fabric-1.21-0.0.5.jar"
+hash-format = "sha512"
+hash = "4913d47db73e5b4af613c8d0ecde0d3d7c6bafe4e251f157878251dcb81cf5247f5642406090dd5103164369771a48d00128f4b956b02ab60b5b6d07e7ad5a37"
+
+[update]
+[update.modrinth]
+mod-id = "Yt3rEMOb"
+version = "TpHvBaS6"

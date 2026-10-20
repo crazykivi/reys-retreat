@@ -1,0 +1,13 @@
+name = "Illuminated"
+filename = "illuminated-1.0.1+1.21.1.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/y1Yc8XYq/versions/ttgiPh0g/illuminated-1.0.1%2B1.21.1.jar"
+hash-format = "sha512"
+hash = "e3eba437421a540b5d5beca52147ba6046ee112365b01ba4ceb5300922b13e82f80124977271e768fafdef38be0d939c071eca7768d3255ca867f93f3fc63581"
+
+[update]
+[update.modrinth]
+mod-id = "y1Yc8XYq"
+version = "ttgiPh0g"
