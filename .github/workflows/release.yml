@@ -59,6 +59,26 @@ jobs:
           go-version: '1.24'
           cache: false
 
+      - name: Test portable downloader
+        working-directory: installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+
+      - name: Build portable Windows downloader
+        working-directory: installer
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          go build -trimpath -ldflags="-s -w" -o ../dist/reys-retreat-mod-downloader-windows-amd64.exe .
+          test -s ../dist/reys-retreat-mod-downloader-windows-amd64.exe
+
       - name: Install Packwiz
         shell: bash
         run: |
@@ -191,7 +211,7 @@ jobs:
             echo
             echo "## Installation"
             echo
-            echo "1. Download one of the `.mrpack` files below."
+            printf '%s\n' '1. Download one of the `.mrpack` files below.'
             echo "2. Import the file into the Modrinth App (or another launcher that supports Modrinth modpacks)."
             echo "3. Launch the created profile. The pack targets Minecraft 1.21.1 with Fabric."
             echo
@@ -281,10 +301,15 @@ jobs:
           {
             echo "## Downloads"
             echo
-            echo "- `reys-retreat-standard-${VERSION}.mrpack` — Standard Edition."
-            echo "- `reys-retreat-nvidia-${VERSION}.mrpack` — NVIDIA Edition with Nvidium."
+            printf '%s\n' "- `reys-retreat-standard-${VERSION}.mrpack` — Standard Edition."
+            printf '%s\n' "- `reys-retreat-nvidia-${VERSION}.mrpack` — NVIDIA Edition with Nvidium."
             echo
-            echo "Both files are Modrinth-format modpack archives; they do not contain a standalone copy of every mod JAR."
+            echo 'Both files are Modrinth-format modpack archives; they do not contain a standalone copy of every mod JAR.'
+            echo
+            echo '### Portable Windows mod downloader'
+            echo
+            echo '- `reys-retreat-mod-downloader-windows-amd64.exe` — standalone Windows x64 utility.'
+            echo '- It downloads and verifies mod JARs from a selected release into a folder. It does not install a Minecraft profile, copy configs, or launch the game.'
           } >> body.md
 
       - name: Publish GitHub Release
@@ -295,6 +320,7 @@ jobs:
           files: |
             dist/reys-retreat-standard-${{ env.VERSION }}.mrpack
             dist/reys-retreat-nvidia-${{ env.VERSION }}.mrpack
+            dist/reys-retreat-mod-downloader-windows-amd64.exe
           fail_on_unmatched_files: true
           generate_release_notes: false
         env:
