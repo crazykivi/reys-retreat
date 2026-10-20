@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -26,7 +27,7 @@ const (
 	githubAPI = "https://api.github.com/repos/crazykivi/reys-retreat/releases"
 	modrinthAPI = "https://api.modrinth.com/v2"
 	gameVersion = "1.21.1"
-	userAgent = "ReysRetreatInstaller/0.1.0 (https://github.com/crazykivi/reys-retreat)"
+	userAgent = "ReysRetreatModDownloader/0.1.0 (https://github.com/crazykivi/reys-retreat)"
 )
 
 type release struct {
@@ -40,6 +41,7 @@ type release struct {
 type releaseAsset struct {
 	Name string `json:"name"`
 	Size int64 `json:"size"`
+	Digest string `json:"digest"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 type mrpackIndex struct {
@@ -85,7 +87,7 @@ var stdinReader = bufio.NewReader(os.Stdin)
 func main() {
 	versionFlag := flag.String("version", "latest", "release tag (default: latest)")
 	editionFlag := flag.String("edition", "", "standard or nvidia")
-	dirFlag := flag.String("dir", "", "installation directory")
+	dirFlag := flag.String("dir", "", "output directory for mod JAR files")
 	bopFlag := flag.Bool("biomes-o-plenty", false, "also install Biomes O' Plenty")
 	tanFlag := flag.Bool("tough-as-nails", false, "also install Tough As Nails")
 	listFlag := flag.Bool("list", false, "list available stable releases and exit")
@@ -137,8 +139,10 @@ func main() {
 	}
 	assetName := fmt.Sprintf("reys-retreat-%s-%s.mrpack", edition, strings.TrimPrefix(selected.TagName, "v"))
 	assetURL := ""
+	assetSize := int64(0)
+	assetDigest := ""
 	for _, a := range selected.Assets {
-		if a.Name == assetName { assetURL = a.BrowserDownloadURL; break }
+		if a.Name == assetName { assetURL = a.BrowserDownloadURL; assetSize = a.Size; assetDigest = a.Digest; break }
 	}
 	if assetURL == "" {
 		fatalf("Release %s does not contain asset %s.", selected.TagName, assetName)
@@ -148,22 +152,20 @@ func main() {
 	if dest == "" {
 		defaultDir := filepath.Join(".", "Reys-Retreat-"+strings.TrimPrefix(selected.TagName, "v")+"-"+strings.ToUpper(edition))
 		fmt.Printf("Mods output directory [%s]: ", defaultDir)
-		if line, _ := bufio.NewReader(os.Stdin).ReadString('\n'); strings.TrimSpace(line) != "" { dest = strings.TrimSpace(line) } else { dest = defaultDir }
+		if line, _ := stdinReader.ReadString('\n'); strings.TrimSpace(line) != "" { dest = strings.TrimSpace(line) } else { dest = defaultDir }
 	}
 	dest, err = filepath.Abs(dest)
 	if err != nil { fatalf("Invalid installation path: %v", err) }
 	if _, err := os.Stat(dest); err == nil {
 		if !isDirectoryEmpty(dest) {
-			fmt.Printf("Directory %s already exists and is not empty.\n", dest)
-			choice := askChoice("Continue and merge files? 1) No (recommended)  2) Yes", map[string]string{"1":"no","2":"yes","no":"no","yes":"yes"})
-			if choice != "yes" { fmt.Println("Cancelled; existing files were not changed."); return }
+			fatalf("Output directory %s is not empty. Choose an empty folder to avoid overwriting files.", dest)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) { fatalf("Cannot access destination: %v", err) }
 
 	fmt.Printf("\nRelease: %s\nEdition: %s\nTarget: %s\n", selected.TagName, edition, dest)
-	fmt.Println("Downloading modpack manifest...")
+	fmt.Println("Reading release manifest (temporary download; only JARs will be kept in the output folder)...")
 	packPath := filepath.Join(os.TempDir(), "reys-retreat-"+strings.TrimPrefix(selected.TagName, "v")+"-"+edition+".mrpack")
-	if err := downloadToFile(assetURL, packPath, nil, 0); err != nil { fatalf("Modpack download failed: %v", err) }
+	if err := downloadTempAsset(assetURL, packPath, assetSize, assetDigest); err != nil { fatalf("Could not read release manifest: %v", err) }
 	defer os.Remove(packPath)
 
 	if err := downloadMrpackMods(packPath, dest); err != nil { fatalf("Mod download failed: %v", err) }
@@ -330,6 +332,34 @@ func saveModVersion(v *modVersion, modsDir string, installed map[string]bool) er
 		fmt.Printf("Added required dependency: %s %s\n", v.Name, v.VersionNumber)
 	}
 	for _, dep := range v.Dependencies { if dep.DependencyType == "required" { if dep.VersionID != "" { if err := installModVersionByID(dep.VersionID, modsDir, installed); err != nil { return err } } else if dep.ProjectID != "" { if err := installModByProjectID(dep.ProjectID, modsDir, installed); err != nil { return err } } } }
+	return nil
+}
+
+func downloadTempAsset(rawURL, target string, expectedSize int64, expectedDigest string) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil { return err }
+	tmp := target + ".part"
+	_ = os.Remove(tmp)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil { return err }
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := httpClient.Do(req)
+	if err != nil { return err }
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return fmt.Errorf("HTTP %s from release asset", resp.Status) }
+	if expectedSize > 0 && resp.ContentLength > 0 && resp.ContentLength != expectedSize { return fmt.Errorf("asset size mismatch: expected %d, server reports %d", expectedSize, resp.ContentLength) }
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil { return err }
+	h := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(resp.Body, 2<<30))
+	closeErr := out.Close()
+	if copyErr != nil { _ = os.Remove(tmp); return copyErr }
+	if closeErr != nil { _ = os.Remove(tmp); return closeErr }
+	if expectedSize > 0 && n != expectedSize { _ = os.Remove(tmp); return fmt.Errorf("asset size mismatch: expected %d bytes, got %d", expectedSize, n) }
+	if strings.HasPrefix(strings.ToLower(expectedDigest), "sha256:") && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), strings.TrimPrefix(strings.ToLower(expectedDigest), "sha256:")) {
+		_ = os.Remove(tmp)
+		return errors.New("GitHub release asset SHA-256 digest mismatch")
+	}
+	if err := os.Rename(tmp, target); err != nil { _ = os.Remove(tmp); return err }
 	return nil
 }
 
