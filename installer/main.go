@@ -93,8 +93,8 @@ func main() {
 	listFlag := flag.Bool("list", false, "list available stable releases and exit")
 	flag.Parse()
 
-	fmt.Println("Rey's Retreat Installer")
-	fmt.Println("-----------------------")
+	fmt.Println("Rey's Retreat Mod Downloader")
+	fmt.Println("---------------------------")
 	if runtime.GOOS != "windows" {
 		fmt.Println("Note: this is a cross-platform Go CLI; the first target is Windows.")
 	}
@@ -155,7 +155,7 @@ func main() {
 		if line, _ := stdinReader.ReadString('\n'); strings.TrimSpace(line) != "" { dest = strings.TrimSpace(line) } else { dest = defaultDir }
 	}
 	dest, err = filepath.Abs(dest)
-	if err != nil { fatalf("Invalid installation path: %v", err) }
+	if err != nil { fatalf("Invalid output directory: %v", err) }
 	if _, err := os.Stat(dest); err == nil {
 		if !isDirectoryEmpty(dest) {
 			fatalf("Output directory %s is not empty. Choose an empty folder to avoid overwriting files.", dest)
