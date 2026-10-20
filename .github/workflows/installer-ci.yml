@@ -1,0 +1,50 @@
+name: Installer CI
+
+on:
+  push:
+    branches:
+      - feature/go-portable-installer
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer-ci.yml"
+  pull_request:
+    paths:
+      - "installer/**"
+      - ".github/workflows/installer-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: installer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: installer/go.mod
+          cache-dependency-path: installer/go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build Windows executable
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o reys-retreat-installer.exe .
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: reys-retreat-installer-windows-amd64
+          path: installer/reys-retreat-installer.exe
+          if-no-files-found: error
