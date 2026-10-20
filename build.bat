@@ -93,9 +93,29 @@ if not exist "%STD%\mods" (
     echo ERROR: mods directory is missing from the Standard workspace.
     goto :failed
 )
+
 for /r "%STD%\mods" %%F in (*.pw.toml.disabled) do if exist "%%F" del /q "%%F"
 
+REM Standard must never contain NVIDIA-only Nvidium metadata.
+if exist "%STD%\mods\nvidium.pw.toml" (
+    del /q "%STD%\mods\nvidium.pw.toml"
+    if exist "%STD%\mods\nvidium.pw.toml" (
+        echo ERROR: could not remove Nvidium metadata from Standard workspace.
+        goto :failed
+    )
+)
+
+REM Keep the NVIDIA-only source metadata out of the Standard workspace.
+if exist "%STD%\extra\nvidia\nvidium.pw.toml" (
+    del /q "%STD%\extra\nvidia\nvidium.pw.toml"
+    if exist "%STD%\extra\nvidia\nvidium.pw.toml" (
+        echo ERROR: could not remove NVIDIA metadata from Standard workspace.
+        goto :failed
+    )
+)
+
 pushd "%STD%"
+
 if errorlevel 1 goto :push_failed
 packwiz refresh
 if errorlevel 1 goto :build_failed
