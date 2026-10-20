@@ -1,0 +1,183 @@
+name: Pack CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "pack.toml"
+      - "index.toml"
+      - "mods/**"
+      - "config/**"
+      - "options.txt"
+      - "extra/**"
+      - "build.bat"
+      - ".github/workflows/pack-ci.yml"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "pack.toml"
+      - "index.toml"
+      - "mods/**"
+      - "config/**"
+      - "options.txt"
+      - "extra/**"
+      - "build.bat"
+      - ".github/workflows/pack-ci.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    name: Build and validate both editions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate pack version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pack.toml
+          test -f index.toml
+          test -d mods
+          VERSION="$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' pack.toml | head -n 1)"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pack.toml version must use MAJOR.MINOR.PATCH; got '$VERSION'."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Install Packwiz
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/packwiz/packwiz@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/packwiz" --help
+
+      - name: Prepare isolated workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reys-standard" "$RUNNER_TEMP/reys-nvidia" dist
+          rsync -a --delete \
+            --exclude='.git/' --exclude='dist/' --exclude='incoming/' \
+            --exclude='.idea/' --exclude='.vscode/' \
+            "$GITHUB_WORKSPACE/" "$RUNNER_TEMP/reys-standard/"
+          rsync -a --delete \
+            --exclude='.git/' --exclude='dist/' --exclude='incoming/' \
+            --exclude='.idea/' --exclude='.vscode/' \
+            "$GITHUB_WORKSPACE/" "$RUNNER_TEMP/reys-nvidia/"
+          test -f "$RUNNER_TEMP/reys-nvidia/extra/nvidia/nvidium.pw.toml"
+
+      - name: Build Standard Edition
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="$RUNNER_TEMP/reys-standard"
+          OUTPUT="$GITHUB_WORKSPACE/dist/reys-retreat-standard-${VERSION}.mrpack"
+
+          find "$WORKSPACE/mods" -type f -name '*.pw.toml.disabled' -delete
+          # NVIDIA-only metadata must not be visible to Packwiz in Standard.
+          find "$WORKSPACE/mods" -type f -iname 'nvidium.pw.toml' -delete
+          rm -f "$WORKSPACE/extra/nvidia/nvidium.pw.toml"
+
+          if find "$WORKSPACE/mods" -type f -iname 'nvidium.pw.toml' -print -quit | grep -q .; then
+            echo "::error::Nvidium metadata remains in Standard workspace."
+            exit 1
+          fi
+
+          cd "$WORKSPACE"
+          packwiz refresh
+          packwiz modrinth export --output "$OUTPUT"
+          test -s "$OUTPUT"
+
+      - name: Build NVIDIA Edition
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKSPACE="$RUNNER_TEMP/reys-nvidia"
+          OUTPUT="$GITHUB_WORKSPACE/dist/reys-retreat-nvidia-${VERSION}.mrpack"
+
+          test -f "$WORKSPACE/extra/nvidia/nvidium.pw.toml"
+          cp "$WORKSPACE/extra/nvidia/nvidium.pw.toml" "$WORKSPACE/mods/nvidium.pw.toml"
+          find "$WORKSPACE/mods" -type f -name '*.pw.toml.disabled' -delete
+
+          cd "$WORKSPACE"
+          packwiz refresh
+          packwiz modrinth export --output "$OUTPUT"
+          test -s "$OUTPUT"
+
+      - name: Validate generated archives
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "dist/reys-retreat-standard-${VERSION}.mrpack" "dist/reys-retreat-nvidia-${VERSION}.mrpack" <<'PY'
+          import json
+          import sys
+          import zipfile
+
+          def inspect_archive(path):
+              with zipfile.ZipFile(path) as archive:
+                  bad_member = archive.testzip()
+                  if bad_member is not None:
+                      raise SystemExit(f"ERROR: corrupt ZIP member {bad_member!r} in {path}")
+                  if "modrinth.index.json" not in archive.namelist():
+                      raise SystemExit(f"ERROR: {path} is missing modrinth.index.json")
+                  with archive.open("modrinth.index.json") as stream:
+                      index = json.load(stream)
+
+              files = index.get("files")
+              if not isinstance(files, list):
+                  raise SystemExit(f"ERROR: invalid files list in {path}")
+              paths = [
+                  item.get("path", "")
+                  for item in files
+                  if isinstance(item, dict) and isinstance(item.get("path", ""), str)
+              ]
+              nvidium = [
+                  item for item in paths
+                  if item.lower().startswith("mods/")
+                  and item.rsplit("/", 1)[-1].lower().startswith("nvidium")
+                  and item.lower().endswith(".jar")
+              ]
+              return paths, nvidium
+
+          standard_files, standard_nvidium = inspect_archive(sys.argv[1])
+          nvidia_files, nvidia_nvidium = inspect_archive(sys.argv[2])
+
+          if standard_nvidium:
+              raise SystemExit(f"ERROR: Standard Edition contains Nvidium: {standard_nvidium}")
+          if not nvidia_nvidium:
+              raise SystemExit("ERROR: NVIDIA Edition does not include Nvidium in its index.")
+
+          print(f"Standard indexed files: {len(standard_files)}")
+          print(f"NVIDIA indexed files: {len(nvidia_files)}")
+          print("Archive integrity and edition checks passed.")
+          PY
+
+      - name: Upload validated archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: reys-retreat-${{ steps.version.outputs.version }}-mrpack-editions
+          path: dist/*.mrpack
+          if-no-files-found: error
+          retention-days: 14
