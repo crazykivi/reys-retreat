@@ -80,6 +80,7 @@ type modDependency struct {
 }
 
 var httpClient = &http.Client{Timeout: 90 * time.Second}
+var stdinReader = bufio.NewReader(os.Stdin)
 
 func main() {
 	versionFlag := flag.String("version", "latest", "release tag (default: latest)")
@@ -387,10 +388,9 @@ func flagWasPassed(name string) bool {
 	return found
 }
 func askYesNo(prompt string) bool {
-	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print(prompt + " ")
-		line, _ := reader.ReadString('\n')
+		line, _ := stdinReader.ReadString('\n')
 		switch strings.ToLower(strings.TrimSpace(line)) {
 		case "y", "yes": return true
 		case "", "n", "no": return false
