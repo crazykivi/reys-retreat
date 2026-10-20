@@ -289,6 +289,7 @@ func installModBySlug(slug, modsDir string, installed map[string]bool) error {
 	if fileMatchesHashes(target, file.Hashes) {
 		fmt.Printf("Optional mod already valid: %s %s\n", chosen.Name, chosen.VersionNumber)
 	} else {
+		if _, err := os.Stat(target); err == nil { return fmt.Errorf("refusing to overwrite existing file %s with optional mod %s; choose a clean output folder or remove the conflicting file", target, chosen.Name) } else if !errors.Is(err, os.ErrNotExist) { return err }
 		if err := downloadToFile(file.URL, target, file.Hashes, file.Size); err != nil { return fmt.Errorf("download %s: %w", chosen.Name, err) }
 		fmt.Printf("Added optional mod: %s %s\n", chosen.Name, chosen.VersionNumber)
 	}
@@ -324,6 +325,7 @@ func saveModVersion(v *modVersion, modsDir string, installed map[string]bool) er
 	if err := os.MkdirAll(modsDir, 0755); err != nil { return err }
 	target := filepath.Join(modsDir, filepath.Base(file.Filename))
 	if !fileMatchesHashes(target, file.Hashes) {
+		if _, err := os.Stat(target); err == nil { return fmt.Errorf("refusing to overwrite existing file %s with required dependency %s", target, v.Name) } else if !errors.Is(err, os.ErrNotExist) { return err }
 		if err := downloadToFile(file.URL, target, file.Hashes, file.Size); err != nil { return err }
 		fmt.Printf("Added required dependency: %s %s\n", v.Name, v.VersionNumber)
 	}
